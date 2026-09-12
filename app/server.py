@@ -1,7 +1,14 @@
 import asyncio
 import json
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.middleware.cors import CORSMiddleware
 
 from .datasets import (
     list_drivers,
@@ -18,9 +25,9 @@ from .telemetry import (
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # APPLICATION
-# ---------------------------------------------------------
+# =========================================================
 
 app = FastAPI(
     title="F1 Telemetry API",
@@ -29,9 +36,36 @@ app = FastAPI(
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
+# CORS
+# =========================================================
+#
+# These are the browser origins allowed to call the REST API.
+#
+# Production frontend:
+#   https://swayamjagtap.github.io
+#
+# Local frontend testing:
+#   http://localhost:5500
+#   http://127.0.0.1:5500
+#
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://swayamjagtap.github.io",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =========================================================
 # ROOT / HEALTH
-# ---------------------------------------------------------
+# =========================================================
 
 @app.get("/")
 async def root():
@@ -49,9 +83,9 @@ async def health():
     }
 
 
-# ---------------------------------------------------------
+# =========================================================
 # DATASET DISCOVERY
-# ---------------------------------------------------------
+# =========================================================
 
 @app.get("/api/seasons")
 async def seasons():
@@ -150,9 +184,9 @@ async def drivers(
     }
 
 
-# ---------------------------------------------------------
+# =========================================================
 # REST TELEMETRY
-# ---------------------------------------------------------
+# =========================================================
 
 @app.get("/api/telemetry")
 async def telemetry(
@@ -222,9 +256,9 @@ async def telemetry(
     }
 
 
-# ---------------------------------------------------------
+# =========================================================
 # WEBSOCKET TELEMETRY PLAYBACK
-# ---------------------------------------------------------
+# =========================================================
 
 @app.websocket("/ws/telemetry")
 async def telemetry_websocket(websocket: WebSocket):
@@ -321,8 +355,8 @@ async def telemetry_websocket(websocket: WebSocket):
 
             return
 
-        # Determine which drivers actually made it into
-        # the generated playback.
+        # Determine which drivers actually made it
+        # into the generated playback.
         playback_drivers = sorted(
             {
                 frame_driver["driver"]
@@ -364,9 +398,9 @@ async def telemetry_websocket(websocket: WebSocket):
             )
         )
 
-        # -------------------------------------------------
+        # =================================================
         # STREAM FRAMES
-        # -------------------------------------------------
+        # =================================================
 
         delay = 1.0 / fps
 
@@ -382,9 +416,9 @@ async def telemetry_websocket(websocket: WebSocket):
 
             await asyncio.sleep(delay)
 
-        # -------------------------------------------------
+        # =================================================
         # PLAYBACK COMPLETE
-        # -------------------------------------------------
+        # =================================================
 
         await websocket.send_text(
             json.dumps(
