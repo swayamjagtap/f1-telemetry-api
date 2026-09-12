@@ -1,10 +1,14 @@
 import asyncio
 import json
+import os
 
 import websockets
 
 
-WS_URL = "ws://127.0.0.1:8000/ws/telemetry"
+WS_URL = os.getenv(
+    "F1_WS_URL",
+    "ws://127.0.0.1:8000/ws/telemetry",
+)
 
 REQUEST = {
     "year": 2025,
@@ -18,6 +22,8 @@ REQUEST = {
 
 
 async def main():
+    print(f"Connecting to: {WS_URL}")
+
     async with websockets.connect(WS_URL) as websocket:
         await websocket.send(json.dumps(REQUEST))
 
