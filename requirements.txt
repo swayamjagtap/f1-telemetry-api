@@ -4,3 +4,4 @@ fastf1
 pandas
 numpy
 pyarrow
+websockets
