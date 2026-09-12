@@ -11,6 +11,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from .datasets import (
+    get_lap_availability,
     list_drivers,
     list_events,
     list_seasons,
@@ -32,23 +33,13 @@ from .telemetry import (
 app = FastAPI(
     title="F1 Telemetry API",
     description="Backend API for the F1 telemetry dashboard.",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 
 # =========================================================
 # CORS
 # =========================================================
-#
-# These are the browser origins allowed to call the REST API.
-#
-# Production frontend:
-#   https://swayamjagtap.github.io
-#
-# Local frontend testing:
-#   http://localhost:5500
-#   http://127.0.0.1:5500
-#
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,7 +63,7 @@ async def root():
     return {
         "name": "F1 Telemetry API",
         "status": "online",
-        "version": "0.3.0",
+        "version": "0.4.0",
     }
 
 
@@ -181,6 +172,63 @@ async def drivers(
         "event": event,
         "session": session,
         "drivers": available_drivers,
+    }
+
+
+# =========================================================
+# LAP DISCOVERY
+# =========================================================
+
+@app.get("/api/laps")
+async def laps(
+    year: int = Query(
+        ...,
+        description="Season year",
+    ),
+    event: str = Query(
+        ...,
+        description="Event directory ID",
+    ),
+    session: str = Query(
+        ...,
+        description="Session directory ID",
+    ),
+    drivers: list[str] = Query(
+        default=[],
+        description=(
+            "Optional driver abbreviations. "
+            "Repeat the parameter for multiple drivers."
+        ),
+    ),
+):
+    availability = get_lap_availability(
+        year=year,
+        event=event,
+        session=session,
+        drivers=drivers,
+    )
+
+    if not availability["all_laps"]:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No lap data found for "
+                f"{year}/{event}/{session}."
+            ),
+        )
+
+    return {
+        "year": year,
+        "event": event,
+        "session": session,
+        "drivers": [
+            driver.strip().upper()
+            for driver in drivers
+            if driver.strip()
+        ],
+        "all_laps": availability["all_laps"],
+        "common_laps": availability["common_laps"],
+        "driver_laps": availability["driver_laps"],
     }
 
 
@@ -328,6 +376,55 @@ async def telemetry_websocket(websocket: WebSocket):
             min(fps, 60.0),
         )
 
+        # -------------------------------------------------
+        # Validate driver/lap compatibility
+        # -------------------------------------------------
+
+        availability = get_lap_availability(
+            year=year,
+            event=event,
+            session=session,
+            drivers=drivers,
+        )
+
+        common_laps = availability[
+            "common_laps"
+        ]
+
+        if lap not in common_laps:
+
+            missing_drivers = [
+                driver
+                for driver in drivers
+                if lap not in availability[
+                    "driver_laps"
+                ].get(driver, [])
+            ]
+
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "error",
+                        "message": (
+                            f"Lap {lap} is not available "
+                            "for all selected drivers."
+                        ),
+                        "lap": lap,
+                        "drivers": drivers,
+                        "missing_drivers": missing_drivers,
+                        "available_laps": common_laps,
+                    }
+                )
+            )
+
+            await websocket.close()
+
+            return
+
+        # -------------------------------------------------
+        # Build playback
+        # -------------------------------------------------
+
         playback = build_playback_frames(
             year=year,
             event=event,
@@ -382,7 +479,10 @@ async def telemetry_websocket(websocket: WebSocket):
 
             return
 
-        # Tell the client what playback it actually received.
+        # -------------------------------------------------
+        # READY
+        # -------------------------------------------------
+
         await websocket.send_text(
             json.dumps(
                 {
@@ -398,13 +498,14 @@ async def telemetry_websocket(websocket: WebSocket):
             )
         )
 
-        # =================================================
+        # -------------------------------------------------
         # STREAM FRAMES
-        # =================================================
+        # -------------------------------------------------
 
         delay = 1.0 / fps
 
         for frame in playback:
+
             await websocket.send_text(
                 json.dumps(
                     {
@@ -416,9 +517,9 @@ async def telemetry_websocket(websocket: WebSocket):
 
             await asyncio.sleep(delay)
 
-        # =================================================
-        # PLAYBACK COMPLETE
-        # =================================================
+        # -------------------------------------------------
+        # COMPLETE
+        # -------------------------------------------------
 
         await websocket.send_text(
             json.dumps(
@@ -433,6 +534,7 @@ async def telemetry_websocket(websocket: WebSocket):
         return
 
     except Exception as exc:
+
         try:
             await websocket.send_text(
                 json.dumps(
